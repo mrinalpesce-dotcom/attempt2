@@ -1,16 +1,74 @@
-# React + Vite
+# 🛡️ CyberShield — AI-Driven Threat Detection Platform
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A full-stack cybersecurity command center with real-time threat detection, WebSocket-powered live monitoring, MITRE ATT&CK mapping, and AI-driven prevention engine.
 
-Currently, two official plugins are available:
+## 📁 Project Structure
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```
+cyber-shield/
+├── frontend/          # React + Vite frontend
+│   ├── src/
+│   │   ├── components/    # Reusable UI components
+│   │   ├── pages/         # Route pages (Dashboard, Alerts, etc.)
+│   │   ├── context/       # Auth, Socket, Theme contexts
+│   │   └── api.js         # API client
+│   ├── public/
+│   ├── index.html
+│   ├── vite.config.js
+│   └── package.json
+│
+├── backend/           # Node.js + Express + MongoDB backend
+│   ├── config/            # Database config
+│   ├── middleware/         # Auth middleware
+│   ├── models/            # Mongoose models
+│   ├── routes/            # API routes
+│   ├── index.js           # Main server (REST + WebSocket)
+│   └── package.json
+│
+└── sentinel-ai/       # Python AI Engine (optional)
+    ├── detection_engine.py
+    ├── prevention_engine.py
+    └── main.py
+```
 
-## React Compiler
+## 🚀 Quick Start
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Backend
+```bash
+cd backend
+npm install
+# Set up .env (see .env.example)
+npm start
+```
 
-## Expanding the ESLint configuration
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 🌐 Deployment
+
+- **Frontend**: Deployed on [Vercel](https://vercel.com)
+- **Backend**: Deployed on [Render](https://render.com)
+
+## ⚡ Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19, Vite, Framer Motion, Recharts, Socket.io-client |
+| Backend | Node.js, Express, MongoDB, Socket.io, JWT |
+| AI Engine | Python, FastAPI (optional) |
+
+## 🔐 Features
+
+- Real-time threat dashboard with WebSocket
+- Global attack map with live threat visualization
+- MITRE ATT&CK framework mapping  
+- Brute force simulation engine
+- Prevention engine with DLP, encryption monitoring
+- Automated playbook execution
+- System metrics monitoring (CPU, Memory, Network)
+- Role-based admin panel with audit logs
+- Cybersecurity news feed (RSS)
