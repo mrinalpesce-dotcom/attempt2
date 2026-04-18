@@ -7,6 +7,7 @@ import {
 import AttackMap from '../components/AttackMap';
 import ThreatChart from '../components/ThreatChart';
 import LiveAlertsFeed from '../components/LiveAlertsFeed';
+import SecurityNews from '../components/SecurityNews';
 import { useSocket } from '../context/SocketContext';
 import { fetchDashboardStats, fetchAlerts, fetchThreats, fetchTimeline } from '../api';
 
@@ -148,6 +149,14 @@ export default function Dashboard() {
           <div className="card-body">
             <ThreatChart data={timeline} />
           </div>
+        </div>
+      </div>
+
+      {/* News + Feed row */}
+      <div className="dashboard-grid" style={{ gridTemplateColumns: '1fr 340px' }}>
+        {/* Security News */}
+        <div className="card">
+          <SecurityNews />
         </div>
 
         {/* Live Alerts Feed */}

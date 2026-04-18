@@ -12,6 +12,8 @@ from typing import Set
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import psutil
+import socket
 
 from log_generator import LogGenerator
 from detection_engine import DetectionEngine
@@ -50,6 +52,12 @@ class SentinelState:
             "alerts_active": len([a for a in self.alerts if a.get("severity") in ("Critical","High")]),
             "uptime_s": round(uptime_s),
             "eps": round(self.events_processed / max(uptime_s, 1), 1),
+            "system": {
+                "cpu": psutil.cpu_percent(),
+                "memory": psutil.virtual_memory().percent,
+                "hostname": socket.gethostname(),
+                "ip": socket.gethostbyname(socket.gethostname())
+            }
         }
 
 state = SentinelState()

@@ -6,8 +6,12 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import os from 'os';
 import WebSocket from 'ws';
+import si from 'systeminformation';
+import Parser from 'rss-parser';
 
 dotenv.config();
+
+const rssParser = new Parser();
 
 const app = express();
 const httpServer = createServer(app);
@@ -372,42 +376,48 @@ function generateLiveLog() {
   };
 }
 
-function getSystemMetrics() {
-  // Simulate fluctuating system metrics
-  systemState.cpuUsage = clamp(jitter(systemState.cpuUsage, 12), 8, 95);
-  systemState.memoryUsage = clamp(jitter(systemState.memoryUsage, 6), 35, 94);
-  systemState.diskUsage = clamp(jitter(systemState.diskUsage, 1), 30, 85);
-  systemState.networkIn = clamp(jitter(systemState.networkIn, 80), 50, 500);
-  systemState.networkOut = clamp(jitter(systemState.networkOut, 60), 40, 400);
-  systemState.packetsPerSec = clamp(jitter(systemState.packetsPerSec, 800), 500, 8000);
-  systemState.bandwidth = clamp(jitter(systemState.bandwidth, 40), 20, 350);
-  systemState.latency = clamp(jitter(systemState.latency, 10), 5, 80);
-  systemState.droppedPackets = Math.floor(Math.random() * 5);
-  systemState.activeConnections = clamp(Math.floor(jitter(systemState.activeConnections, 6)), 3, 50);
-  systemState.requestsPerMin = clamp(Math.floor(jitter(systemState.requestsPerMin, 100)), 100, 800);
-  systemState.errorRate = clamp(jitter(systemState.errorRate, 1), 0, 5);
+async function getSystemMetrics() {
+  try {
+    const cpu = await si.currentLoad();
+    const mem = await si.mem();
+    const network = await si.networkStats();
+    const uptimeSeconds = os.uptime();
+    
+    // Update our internal state with real data
+    systemState.cpuUsage = cpu.currentLoad;
+    systemState.memoryUsage = (mem.active / mem.total) * 100;
+    
+    if (network && network.length > 0) {
+      // Aggregate stats across all interfaces
+      const totalRx = network.reduce((acc, curr) => acc + (curr.rx_sec || 0), 0) / (1024 * 1024); // MB/s
+      const totalTx = network.reduce((acc, curr) => acc + (curr.tx_sec || 0), 0) / (1024 * 1024); // MB/s
+      systemState.bandwidth = totalRx + totalTx;
+      systemState.networkIn = totalRx;
+      systemState.networkOut = totalTx;
+    }
 
-  const uptimeSeconds = Math.floor((Date.now() - serverStartTime) / 1000);
-  const days = Math.floor(uptimeSeconds / 86400);
-  const hours = Math.floor((uptimeSeconds % 86400) / 3600);
-  const minutes = Math.floor((uptimeSeconds % 3600) / 60);
-  const secs = uptimeSeconds % 60;
+    const hours = Math.floor((uptimeSeconds % 86400) / 3600);
+    const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+    const secs = Math.floor(uptimeSeconds % 60);
 
-  return {
-    ...systemState,
-    uptime: `${days}d ${hours}h ${minutes}m`,
-    uptimeSeconds,
-    formattedUptime: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`,
-    connectedClients,
-    serverTime: new Date().toISOString(),
-    nodeVersion: process.version,
-    platform: process.platform,
-    // Real system info
-    totalMemory: Math.round(os.totalmem() / (1024 * 1024 * 1024) * 10) / 10,
-    freeMemory: Math.round(os.freemem() / (1024 * 1024 * 1024) * 10) / 10,
-    cpuCores: os.cpus().length,
-    hostname: os.hostname(),
-  };
+    return {
+      ...systemState,
+      uptime: `${Math.floor(uptimeSeconds / 86400)}d ${hours}h ${minutes}m`,
+      uptimeSeconds,
+      formattedUptime: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`,
+      connectedClients,
+      serverTime: new Date().toISOString(),
+      nodeVersion: process.version,
+      platform: process.platform,
+      totalMemory: Math.round(mem.total / (1024 * 1024 * 1024) * 10) / 10,
+      freeMemory: Math.round(mem.free / (1024 * 1024 * 1024) * 10) / 10,
+      cpuCores: os.cpus().length,
+      hostname: os.hostname(),
+    };
+  } catch (err) {
+    console.error('Error fetching real system metrics:', err);
+    return { ...systemState, formattedUptime: '00:00:00' };
+  }
 }
 
 function updateDashboardCounters() {
@@ -734,8 +744,29 @@ app.get('/api/reports/summary', async (req, res) => {
 });
 
 // ── System Metrics ──
-app.get('/api/system/metrics', (req, res) => {
-  res.json(getSystemMetrics());
+app.get('/api/system/metrics', async (req, res) => {
+  const metrics = await getSystemMetrics();
+  res.json(metrics);
+});
+
+// ── Live Cyber Security News ──
+app.get('/api/news', async (req, res) => {
+  try {
+    const feed = await rssParser.parseURL('https://thehackernews.com/feeds/posts/default');
+    const items = feed.items.map(item => ({
+      title: item.title,
+      link: item.link,
+      content: item.contentSnippet,
+      date: item.pubDate,
+      author: item.creator
+    })).slice(0, 10);
+    res.json(items);
+  } catch (err) {
+    console.error('RSS Feed error:', err);
+    res.json([
+      { title: 'CyberShield News Feed Offline', link: '#', content: 'Unable to fetch real-time news at this moment.', date: new Date().toISOString() }
+    ]);
+  }
 });
 
 // ── Admin: Audit Logs ──
@@ -1122,7 +1153,7 @@ io.on('connection', (socket) => {
 
   // Send initial data burst
   socket.emit('statsUpdate', { ...dashboardCounters });
-  socket.emit('systemMetrics', getSystemMetrics());
+  getSystemMetrics().then(metrics => socket.emit('systemMetrics', metrics));
   socket.emit('reportData', updateReportData());
   socket.emit('mitreCounts', { ...mitreCounts });
 
@@ -1144,8 +1175,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('requestSystemMetrics', () => {
-    socket.emit('systemMetrics', getSystemMetrics());
+  socket.on('requestSystemMetrics', async () => {
+    const metrics = await getSystemMetrics();
+    socket.emit('systemMetrics', metrics);
   });
 
   socket.on('requestReportData', () => {
@@ -1305,10 +1337,11 @@ function startStatsEmitter() {
 
 // ── System Metrics (high-speed real-time updates) ──
 function startMetricsEmitter() {
-  setInterval(() => {
+  setInterval(async () => {
     if (connectedClients === 0) return;
-    io.emit('systemMetrics', getSystemMetrics());
-  }, 500);
+    const metrics = await getSystemMetrics();
+    io.emit('systemMetrics', metrics);
+  }, 1000); // 1s for real data to avoid overhead
 }
 
 // ── Network Activity Bars (real-time stream) ──

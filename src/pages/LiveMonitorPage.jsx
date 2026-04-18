@@ -6,6 +6,7 @@ import {
   TrendingUp, ArrowUpRight, ArrowDownRight, Monitor, HardDrive
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
+import SecurityNews from '../components/SecurityNews';
 
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString('en-US', {
@@ -248,6 +249,9 @@ export default function LiveMonitorPage() {
             ))}
           </div>
         </div>
+
+        {/* Global News Section */}
+        <SecurityNews />
       </div>
 
       {/* Threat Summary Cards */}
