@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 
 const SocketContext = createContext(null);
 
-const SOCKET_URL = '/';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || '/';
 
 export function SocketProvider({ children }) {
   const [isConnected, setIsConnected] = useState(false);
