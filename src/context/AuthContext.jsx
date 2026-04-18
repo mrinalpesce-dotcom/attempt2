@@ -5,7 +5,7 @@ const AuthContext = createContext(null);
 // Hardcoded admin credentials for demonstration
 const ADMIN_CREDENTIALS = {
   username: 'admin',
-  password: 'CyberShield@2026',
+  password: '0000',
   role: 'Super Admin',
   name: 'Security Admin',
   email: 'admin@cybershield.io',
@@ -47,23 +47,19 @@ export function AuthProvider({ children }) {
       ip: `192.168.1.${Math.floor(Math.random() * 254) + 1}`,
     };
 
-    if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
-      const userData = {
-        username: ADMIN_CREDENTIALS.username,
-        name: ADMIN_CREDENTIALS.name,
-        email: ADMIN_CREDENTIALS.email,
-        role: ADMIN_CREDENTIALS.role,
-        loginTime: new Date().toISOString(),
-      };
-      setUser(userData);
-      setIsAuthenticated(true);
-      localStorage.setItem('cybershield_auth', JSON.stringify(userData));
-      setLoginAttempts(prev => [...prev, { ...attempt, success: true }]);
-      return { success: true };
-    }
-
-    setLoginAttempts(prev => [...prev, { ...attempt, success: false }]);
-    return { success: false, error: 'Invalid credentials' };
+    // Accept any username and password
+    const userData = {
+      username: username || 'user',
+      name: username || 'User',
+      email: `${username || 'user'}@cybershield.io`,
+      role: 'Super Admin',
+      loginTime: new Date().toISOString(),
+    };
+    setUser(userData);
+    setIsAuthenticated(true);
+    localStorage.setItem('cybershield_auth', JSON.stringify(userData));
+    setLoginAttempts(prev => [...prev, { ...attempt, success: true }]);
+    return { success: true };
   };
 
   const logout = () => {

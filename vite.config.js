@@ -7,6 +7,16 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // SentinelAI Python backend (prevention + detection engine)
+      '/api/prevention': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/api/sentinel': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      // Node.js backend (everything else)
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,

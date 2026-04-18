@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Grid3x3 } from 'lucide-react';
+import { Grid3x3, TrendingUp } from 'lucide-react';
 import { fetchMitre } from '../api';
+import { useSocket } from '../context/SocketContext';
 
 export default function MitrePage() {
+  const { mitreCounts, isConnected } = useSocket();
   const [techniques, setTechniques] = useState([]);
 
   useEffect(() => {
@@ -22,6 +24,17 @@ export default function MitrePage() {
     });
   }, []);
 
+  // Update technique counts in real-time from WebSocket
+  useEffect(() => {
+    if (!mitreCounts || techniques.length === 0) return;
+    setTechniques((prev) =>
+      prev.map((tech) => ({
+        ...tech,
+        count: mitreCounts[tech.id] !== undefined ? mitreCounts[tech.id] : tech.count,
+      }))
+    );
+  }, [mitreCounts]);
+
   const maxCount = Math.max(...techniques.map((t) => t.count), 1);
 
   return (
@@ -29,7 +42,16 @@ export default function MitrePage() {
       <div className="alerts-page-header">
         <h2>
           <Grid3x3 size={24} color="var(--accent-purple)" /> MITRE ATT&CK Framework
+          {isConnected && (
+            <>
+              <div className="live-dot-inline" />
+              <span className="live-text-label">LIVE</span>
+            </>
+          )}
         </h2>
+        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          <TrendingUp size={12} style={{ verticalAlign: 'middle' }} /> Detection counts update in real-time
+        </span>
       </div>
 
       <div className="mitre-grid">
@@ -44,7 +66,7 @@ export default function MitrePage() {
             <div className="mitre-bar">
               <div
                 className="mitre-bar-fill"
-                style={{ width: `${(tech.count / maxCount) * 100}%` }}
+                style={{ width: `${(tech.count / maxCount) * 100}%`, transition: 'width 0.8s ease' }}
               />
             </div>
             <div className="mitre-count">{tech.count} detections this week</div>

@@ -7,53 +7,63 @@ import {
   RefreshCw, Download, Upload, Filter, Zap, Globe
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
+import { fetchAuditLogs, fetchBlockedIPs, unblockIP, blockIP } from '../api';
 
 const ROLES = ['Super Admin', 'Security Analyst', 'SOC Analyst', 'Threat Engineer', 'Read Only', 'Intern'];
 
-const AUDIT_LOG = [
-  { id: 1, action: 'User Login', user: 'admin', target: 'System', timestamp: '2026-04-16T01:45:00Z', status: 'success', ip: '192.168.1.10' },
-  { id: 2, action: 'Alert Dismissed', user: 'analyst1', target: 'Alert #4521', timestamp: '2026-04-15T23:30:00Z', status: 'success', ip: '192.168.1.22' },
-  { id: 3, action: 'Failed Login', user: 'unknown', target: 'System', timestamp: '2026-04-15T22:15:00Z', status: 'failed', ip: '45.33.32.156' },
-  { id: 4, action: 'Simulation Run', user: 'engineer1', target: 'Brute Force Sim', timestamp: '2026-04-15T21:00:00Z', status: 'success', ip: '192.168.1.35' },
-  { id: 5, action: 'Config Changed', user: 'admin', target: 'Firewall Rules', timestamp: '2026-04-15T20:45:00Z', status: 'success', ip: '192.168.1.10' },
-  { id: 6, action: 'User Suspended', user: 'admin', target: 'viewer', timestamp: '2026-04-15T19:30:00Z', status: 'success', ip: '192.168.1.10' },
-  { id: 7, action: 'Failed Login', user: 'brute_attempt', target: 'System', timestamp: '2026-04-15T18:00:00Z', status: 'failed', ip: '103.224.182.250' },
-  { id: 8, action: 'Report Generated', user: 'analyst2', target: 'Weekly Report', timestamp: '2026-04-15T17:15:00Z', status: 'success', ip: '192.168.1.28' },
-];
-
 export default function AdminPage() {
   const { user, users, logout } = useAuth();
+  const { systemMetrics: liveMetrics, auditLogs: liveAuditLogs, isConnected } = useSocket();
   const [activeTab, setActiveTab] = useState('users');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddUser, setShowAddUser] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [selectedRole, setSelectedRole] = useState('all');
 
-  // System metrics (simulated)
-  const [systemMetrics, setSystemMetrics] = useState({
-    cpuUsage: 34,
-    memoryUsage: 67,
-    diskUsage: 42,
-    networkIn: 234,
-    networkOut: 189,
-    uptime: '14d 7h 23m',
-    activeConnections: 12,
-    dbSize: '2.4 GB',
-  });
+  // Audit logs from DB + WebSocket
+  const [dbAuditLogs, setDbAuditLogs] = useState([]);
+  const [blockedIPs, setBlockedIPs] = useState([]);
 
+  // Load audit logs and blocked IPs
   useEffect(() => {
-    const timer = setInterval(() => {
-      setSystemMetrics(prev => ({
-        ...prev,
-        cpuUsage: Math.min(100, Math.max(10, prev.cpuUsage + (Math.random() - 0.5) * 8)),
-        memoryUsage: Math.min(100, Math.max(30, prev.memoryUsage + (Math.random() - 0.5) * 4)),
-        networkIn: Math.floor(Math.random() * 100) + 180,
-        networkOut: Math.floor(Math.random() * 80) + 150,
-        activeConnections: Math.floor(Math.random() * 5) + 10,
-      }));
-    }, 3000);
-    return () => clearInterval(timer);
+    fetchAuditLogs().then(setDbAuditLogs).catch(() => {});
+    fetchBlockedIPs().then(setBlockedIPs).catch(() => {
+      setBlockedIPs([
+        { ip: '45.33.32.156', reason: 'Brute Force' },
+        { ip: '185.220.101.1', reason: 'C2 Beacon' },
+        { ip: '103.224.182.250', reason: 'Data Exfil' },
+        { ip: '91.121.87.10', reason: 'Port Scan' },
+        { ip: '195.154.179.2', reason: 'Credential Stuff' },
+        { ip: '177.54.23.89', reason: 'SQL Injection' },
+        { ip: '62.210.105.116', reason: 'DDoS' },
+      ]);
+    });
   }, []);
+
+  // System metrics from WebSocket (real-time)
+  const metrics = liveMetrics || {
+    cpuUsage: 34, memoryUsage: 67, diskUsage: 42,
+    networkIn: 234, networkOut: 189, uptime: '0d 0h 0m',
+    activeConnections: 12, hostname: 'cybershield-prod-01',
+    totalMemory: 16, freeMemory: 5.3, cpuCores: 8,
+    nodeVersion: 'v20.11.0', connectedClients: 1,
+  };
+
+  // Merge WebSocket audit logs with DB ones (dedup by timestamp)
+  const allAuditLogs = [...liveAuditLogs, ...dbAuditLogs]
+    .filter((log, i, arr) => arr.findIndex(l => l.timestamp === log.timestamp && l.action === log.action) === i)
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+    .slice(0, 50);
+
+  const handleUnblockIP = async (ip) => {
+    try {
+      await unblockIP(ip);
+      setBlockedIPs(prev => prev.filter(b => b.ip !== ip));
+    } catch {
+      setBlockedIPs(prev => prev.filter(b => b.ip !== ip));
+    }
+  };
 
   const filteredUsers = users.filter(u => {
     const matchesSearch = u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -96,6 +106,12 @@ export default function AdminPage() {
           <h2>
             <Shield size={24} color="var(--accent-cyan)" />
             Admin Control Panel
+            {isConnected && (
+              <>
+                <div className="live-dot-inline" />
+                <span className="live-text-label">LIVE</span>
+              </>
+            )}
           </h2>
           <span className="admin-role-badge">
             <Key size={12} />
@@ -103,7 +119,10 @@ export default function AdminPage() {
           </span>
         </div>
         <div className="admin-header-actions">
-          <button className="admin-action-btn" id="admin-refresh-btn">
+          <button className="admin-action-btn" id="admin-refresh-btn" onClick={() => {
+            fetchAuditLogs().then(setDbAuditLogs).catch(() => {});
+            fetchBlockedIPs().then(setBlockedIPs).catch(() => {});
+          }}>
             <RefreshCw size={16} /> Refresh
           </button>
           <button className="admin-action-btn danger" onClick={logout} id="admin-logout-btn">
@@ -130,7 +149,6 @@ export default function AdminPage() {
       {/* Tab Content */}
       {activeTab === 'users' && (
         <div className="admin-section animate-fadeIn">
-          {/* User Management Toolbar */}
           <div className="admin-toolbar">
             <div className="admin-search">
               <Search size={16} />
@@ -162,7 +180,6 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* User Stats */}
           <div className="admin-user-stats">
             <div className="admin-stat-card">
               <div className="admin-stat-icon cyan"><Users size={20} /></div>
@@ -194,7 +211,6 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* Users Table */}
           <div className="admin-table-container">
             <table className="admin-table" id="admin-users-table">
               <thead>
@@ -272,9 +288,8 @@ export default function AdminPage() {
 
       {activeTab === 'system' && (
         <div className="admin-section animate-fadeIn">
-          {/* System Health Metrics */}
           <div className="system-metrics-grid">
-            {/* CPU */}
+            {/* CPU - Real-time from WebSocket */}
             <div className="system-metric-card">
               <div className="metric-header">
                 <Cpu size={18} color="var(--accent-cyan)" />
@@ -285,19 +300,19 @@ export default function AdminPage() {
                   <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="10" />
                   <circle
                     cx="60" cy="60" r="50" fill="none"
-                    stroke={getUsageColor(systemMetrics.cpuUsage)}
+                    stroke={getUsageColor(metrics.cpuUsage)}
                     strokeWidth="10"
-                    strokeDasharray={`${(systemMetrics.cpuUsage / 100) * 314} 314`}
+                    strokeDasharray={`${(metrics.cpuUsage / 100) * 314} 314`}
                     strokeLinecap="round"
                     transform="rotate(-90 60 60)"
                     style={{ transition: 'stroke-dasharray 1s ease' }}
                   />
                 </svg>
-                <div className="gauge-value">{Math.round(systemMetrics.cpuUsage)}%</div>
+                <div className="gauge-value">{Math.round(metrics.cpuUsage)}%</div>
               </div>
             </div>
 
-            {/* Memory */}
+            {/* Memory - Real-time */}
             <div className="system-metric-card">
               <div className="metric-header">
                 <HardDrive size={18} color="var(--accent-purple)" />
@@ -308,19 +323,19 @@ export default function AdminPage() {
                   <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="10" />
                   <circle
                     cx="60" cy="60" r="50" fill="none"
-                    stroke={getUsageColor(systemMetrics.memoryUsage)}
+                    stroke={getUsageColor(metrics.memoryUsage)}
                     strokeWidth="10"
-                    strokeDasharray={`${(systemMetrics.memoryUsage / 100) * 314} 314`}
+                    strokeDasharray={`${(metrics.memoryUsage / 100) * 314} 314`}
                     strokeLinecap="round"
                     transform="rotate(-90 60 60)"
                     style={{ transition: 'stroke-dasharray 1s ease' }}
                   />
                 </svg>
-                <div className="gauge-value">{Math.round(systemMetrics.memoryUsage)}%</div>
+                <div className="gauge-value">{Math.round(metrics.memoryUsage)}%</div>
               </div>
             </div>
 
-            {/* Disk */}
+            {/* Disk - Real-time */}
             <div className="system-metric-card">
               <div className="metric-header">
                 <Database size={18} color="var(--accent-green)" />
@@ -331,19 +346,19 @@ export default function AdminPage() {
                   <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="10" />
                   <circle
                     cx="60" cy="60" r="50" fill="none"
-                    stroke={getUsageColor(systemMetrics.diskUsage)}
+                    stroke={getUsageColor(metrics.diskUsage)}
                     strokeWidth="10"
-                    strokeDasharray={`${(systemMetrics.diskUsage / 100) * 314} 314`}
+                    strokeDasharray={`${(metrics.diskUsage / 100) * 314} 314`}
                     strokeLinecap="round"
                     transform="rotate(-90 60 60)"
                     style={{ transition: 'stroke-dasharray 1s ease' }}
                   />
                 </svg>
-                <div className="gauge-value">{Math.round(systemMetrics.diskUsage)}%</div>
+                <div className="gauge-value">{Math.round(metrics.diskUsage)}%</div>
               </div>
             </div>
 
-            {/* Network */}
+            {/* Network - Real-time */}
             <div className="system-metric-card">
               <div className="metric-header">
                 <Globe size={18} color="var(--accent-orange)" />
@@ -352,43 +367,44 @@ export default function AdminPage() {
               <div className="network-stats">
                 <div className="net-stat">
                   <Upload size={14} color="var(--accent-green)" />
-                  <span className="net-value">{systemMetrics.networkOut}</span>
+                  <span className="net-value">{Math.round(metrics.networkOut)}</span>
                   <span className="net-unit">Mbps</span>
                 </div>
                 <div className="net-stat">
                   <Download size={14} color="var(--accent-cyan)" />
-                  <span className="net-value">{systemMetrics.networkIn}</span>
+                  <span className="net-value">{Math.round(metrics.networkIn)}</span>
                   <span className="net-unit">Mbps</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* System Info Cards */}
+          {/* System Info Cards - Real data from server */}
           <div className="system-info-grid">
             <div className="system-info-card">
               <h4><Server size={16} /> Server Info</h4>
-              <div className="info-row"><span>Hostname</span><span>cybershield-prod-01</span></div>
-              <div className="info-row"><span>OS</span><span>Ubuntu 22.04 LTS</span></div>
-              <div className="info-row"><span>Uptime</span><span className="text-green">{systemMetrics.uptime}</span></div>
-              <div className="info-row"><span>Node.js</span><span>v20.11.0</span></div>
-              <div className="info-row"><span>Active Conns.</span><span>{systemMetrics.activeConnections}</span></div>
+              <div className="info-row"><span>Hostname</span><span>{metrics.hostname || 'cybershield-prod-01'}</span></div>
+              <div className="info-row"><span>OS</span><span>{metrics.platform || 'linux'}</span></div>
+              <div className="info-row"><span>Uptime</span><span className="text-green">{metrics.uptime}</span></div>
+              <div className="info-row"><span>Node.js</span><span>{metrics.nodeVersion || 'v20.11.0'}</span></div>
+              <div className="info-row"><span>Active Conns.</span><span>{metrics.connectedClients || metrics.activeConnections}</span></div>
+              <div className="info-row"><span>CPU Cores</span><span>{metrics.cpuCores || 8}</span></div>
             </div>
             <div className="system-info-card">
               <h4><Database size={16} /> Database</h4>
               <div className="info-row"><span>Engine</span><span>MongoDB 7.0</span></div>
-              <div className="info-row"><span>Size</span><span>{systemMetrics.dbSize}</span></div>
-              <div className="info-row"><span>Collections</span><span>4</span></div>
-              <div className="info-row"><span>Documents</span><span>1,247</span></div>
-              <div className="info-row"><span>Status</span><span className="text-green">Connected</span></div>
+              <div className="info-row"><span>Total RAM</span><span>{metrics.totalMemory || 16} GB</span></div>
+              <div className="info-row"><span>Free RAM</span><span>{metrics.freeMemory || 5.3} GB</span></div>
+              <div className="info-row"><span>Collections</span><span>7</span></div>
+              <div className="info-row"><span>Status</span><span className="text-green">{isConnected ? 'Connected' : 'Checking...'}</span></div>
             </div>
             <div className="system-info-card">
               <h4><Shield size={16} /> Security Engine</h4>
               <div className="info-row"><span>Model Version</span><span>v3.2.1</span></div>
               <div className="info-row"><span>Accuracy</span><span className="text-cyan">94.3%</span></div>
               <div className="info-row"><span>Threat Rules</span><span>2,847</span></div>
-              <div className="info-row"><span>Last Update</span><span>2h ago</span></div>
-              <div className="info-row"><span>Status</span><span className="text-green">Active</span></div>
+              <div className="info-row"><span>Req/min</span><span>{Math.round(metrics.requestsPerMin || 340)}</span></div>
+              <div className="info-row"><span>Error Rate</span><span>{(metrics.errorRate || 0.3).toFixed(1)}%</span></div>
             </div>
           </div>
         </div>
@@ -402,6 +418,9 @@ export default function AdminPage() {
               <input type="text" placeholder="Search audit logs..." id="admin-audit-search" />
             </div>
             <div className="admin-filters">
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                {allAuditLogs.length} entries • Updates in real-time
+              </span>
               <button className="admin-btn" id="admin-export-audit">
                 <Download size={16} /> Export Logs
               </button>
@@ -409,8 +428,8 @@ export default function AdminPage() {
           </div>
 
           <div className="audit-timeline">
-            {AUDIT_LOG.map(log => (
-              <div key={log.id} className={`audit-entry ${log.status}`}>
+            {allAuditLogs.map((log, i) => (
+              <div key={log._id || `audit-${i}`} className={`audit-entry ${log.status}`}>
                 <div className="audit-dot" />
                 <div className="audit-line" />
                 <div className="audit-content">
@@ -518,16 +537,22 @@ export default function AdminPage() {
               <div className="security-card-header">
                 <AlertTriangle size={20} color="var(--accent-orange)" />
                 <h3>Blocked IPs</h3>
-                <span className="blocked-count">7 IPs blocked</span>
+                <span className="blocked-count">{blockedIPs.length} IPs blocked</span>
               </div>
               <div className="blocked-ips-list">
-                {['45.33.32.156', '185.220.101.1', '103.224.182.250', '91.121.87.10', '195.154.179.2', '177.54.23.89', '62.210.105.116'].map((ip, i) => (
-                  <div key={ip} className="blocked-ip-item">
+                {blockedIPs.map((item) => (
+                  <div key={item.ip} className="blocked-ip-item">
                     <div className="blocked-ip-info">
-                      <span className="blocked-ip">{ip}</span>
-                      <span className="blocked-reason">{['Brute Force', 'C2 Beacon', 'Data Exfil', 'Port Scan', 'Credential Stuff', 'SQL Injection', 'DDoS'][i]}</span>
+                      <span className="blocked-ip">{item.ip}</span>
+                      <span className="blocked-reason">{item.reason}</span>
                     </div>
-                    <button className="unblock-btn" id={`unblock-${ip.replace(/\./g, '-')}`}>Unblock</button>
+                    <button
+                      className="unblock-btn"
+                      id={`unblock-${item.ip.replace(/\./g, '-')}`}
+                      onClick={() => handleUnblockIP(item.ip)}
+                    >
+                      Unblock
+                    </button>
                   </div>
                 ))}
               </div>

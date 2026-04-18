@@ -3,7 +3,7 @@ import {
   ShieldHalf, Radar, Activity, Globe2, Swords, BookMarked, 
   FileBarChart, Fingerprint, Settings, Zap, Wifi, 
   ChevronRight, Cpu, BarChart3, Server, TerminalSquare, Skull, UserCog,
-  ScanEye, BrainCircuit, Binary
+  ScanEye, BrainCircuit, Binary, ShieldCheck
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 
@@ -17,6 +17,7 @@ const navItems = [
   { id: 'reports', label: 'Intel Reports', icon: FileBarChart, gradient: 'linear-gradient(135deg, #3b82f6, #6366f1)', desc: 'Threat analytics' },
   { id: 'mitre', label: 'MITRE ATT&CK', icon: Fingerprint, gradient: 'linear-gradient(135deg, #ec4899, #f43f5e)', desc: 'TTPs framework' },
   { id: 'logs', label: 'Sys Logs', icon: TerminalSquare, gradient: 'linear-gradient(135deg, #10b981, #06d6a0)', desc: 'Event audit' },
+  { id: 'prevention', label: 'Prevention', icon: ShieldCheck, gradient: 'linear-gradient(135deg, #00d4ff, #10b981)', desc: 'Data breach protection' },
   { id: 'admin', label: 'Admin Panel', icon: UserCog, gradient: 'linear-gradient(135deg, #f59e0b, #ef4444)', desc: 'User management' },
   { id: 'settings', label: 'Settings', icon: Settings, gradient: 'linear-gradient(135deg, #64748b, #94a3b8)', desc: 'Configuration' },
 ];

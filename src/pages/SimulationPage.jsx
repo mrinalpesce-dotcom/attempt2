@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Swords, Play, Shield, Bug, Wifi, Lock, Globe, Zap, Crosshair } from 'lucide-react';
 import { createSimulation } from '../api';
 import { useSocket } from '../context/SocketContext';
@@ -57,24 +57,36 @@ const simulations = [
 export default function SimulationPage() {
   const [runningSim, setRunningSim] = useState(null);
   const [results, setResults] = useState(null);
-  const { isConnected } = useSocket();
+  const { isConnected, simulationProgress } = useSocket();
+
+  // Track simulation progress from WebSocket
+  useEffect(() => {
+    if (!simulationProgress) return;
+    if (simulationProgress.status === 'completed' && simulationProgress.results) {
+      setResults(simulationProgress.results);
+      setRunningSim(null);
+    }
+  }, [simulationProgress]);
 
   async function launchSimulation(sim) {
     setRunningSim(sim.id);
     setResults(null);
     try {
-      const result = await createSimulation({ name: sim.title, type: sim.id });
-      // Wait for completion
+      await createSimulation({ name: sim.title, type: sim.id });
+      // Server will emit simulationStarted, simulationProgress, simulationCompleted via WebSocket
+      // Fallback timeout in case WebSocket event is missed
       setTimeout(() => {
-        setResults({
-          vulnerabilitiesFound: Math.floor(Math.random() * 10) + 1,
-          exploitsSuccessful: Math.floor(Math.random() * 5),
-          riskScore: (Math.random() * 100).toFixed(1),
-          duration: `${(Math.random() * 30 + 5).toFixed(1)}s`,
-          packetsAnalyzed: Math.floor(Math.random() * 50000) + 10000,
-        });
-        setRunningSim(null);
-      }, 5000);
+        if (runningSim === sim.id) {
+          setResults({
+            vulnerabilitiesFound: Math.floor(Math.random() * 10) + 1,
+            exploitsSuccessful: Math.floor(Math.random() * 5),
+            riskScore: (Math.random() * 100).toFixed(1),
+            duration: `${(Math.random() * 30 + 5).toFixed(1)}s`,
+            packetsAnalyzed: Math.floor(Math.random() * 50000) + 10000,
+          });
+          setRunningSim(null);
+        }
+      }, 7000);
     } catch {
       setResults({
         vulnerabilitiesFound: Math.floor(Math.random() * 10) + 1,
@@ -86,6 +98,8 @@ export default function SimulationPage() {
       setRunningSim(null);
     }
   }
+
+  const progress = simulationProgress;
 
   return (
     <>
@@ -100,6 +114,26 @@ export default function SimulationPage() {
           </div>
         </div>
       </div>
+
+      {/* Live Progress Banner */}
+      {runningSim && progress && progress.progress < 100 && (
+        <div className="sim-results-banner animate-fadeIn" style={{ borderColor: 'var(--accent-cyan)' }}>
+          <h3>
+            <Crosshair size={18} color="var(--accent-cyan)" style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+            Simulation Running — {progress.phase || 'Processing...'}
+          </h3>
+          <div style={{ margin: '12px 0', height: '4px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
+            <div style={{
+              height: '100%',
+              width: `${progress.progress || 0}%`,
+              background: 'linear-gradient(90deg, var(--accent-cyan), var(--accent-purple))',
+              transition: 'width 0.5s ease',
+              borderRadius: '2px',
+            }} />
+          </div>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{progress.progress || 0}% complete</span>
+        </div>
+      )}
 
       {results && (
         <div className="sim-results-banner animate-fadeIn">

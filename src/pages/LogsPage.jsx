@@ -1,179 +1,320 @@
-import { useState, useEffect, useRef } from 'react';
-import { Terminal, Filter, Download, Pause, Play, Trash2, Search } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  Terminal, Filter, Search, Pause, Play, Trash2,
+  AlertTriangle, Info, XCircle, Zap, Clock, Activity,
+  ChevronDown, ChevronRight, Radio, Shield, Server,
+  Database, Wifi, Lock, Globe, Cpu, HardDrive, Eye
+} from 'lucide-react';
 import { fetchLogs } from '../api';
 import { useSocket } from '../context/SocketContext';
 
-const LEVEL_COLORS = {
-  info: '#00d4ff',
-  warning: '#ffab40',
-  error: '#ff5252',
-  critical: '#ff1744',
+// ── Level Config ──
+const LEVEL_CONFIG = {
+  info:     { color: '#00d4ff', bg: 'rgba(0,212,255,0.08)',  icon: Info,          label: 'INFO' },
+  warning:  { color: '#ffab40', bg: 'rgba(255,171,64,0.08)', icon: AlertTriangle, label: 'WARN' },
+  error:    { color: '#ff5252', bg: 'rgba(255,82,82,0.08)',  icon: XCircle,       label: 'ERROR' },
+  critical: { color: '#ff1744', bg: 'rgba(255,23,68,0.08)',  icon: Zap,           label: 'CRIT' },
 };
 
-const SIMULATED_LOGS = [
-  { event: 'Packet Inspection', source: 'DPI Engine', details: 'Deep packet inspection completed - 45,892 packets analyzed', level: 'info', timestamp: new Date(Date.now() - 2000).toISOString() },
-  { event: 'Anomaly Detected', source: 'ML Model', details: 'Unusual traffic pattern from subnet 192.168.1.0/24 — anomaly score 0.87', level: 'warning', timestamp: new Date(Date.now() - 5000).toISOString() },
-  { event: 'Firewall Rule Hit', source: 'Firewall', details: 'Blocked inbound connection from 45.33.32.156:4444 (T1071 signature match)', level: 'critical', timestamp: new Date(Date.now() - 8000).toISOString() },
-  { event: 'Certificate Renewed', source: 'TLS Manager', details: 'SSL certificate for api.cybershield.io renewed successfully', level: 'info', timestamp: new Date(Date.now() - 12000).toISOString() },
-  { event: 'DB Query Slow', source: 'MongoDB', details: 'Query on alerts collection took 2.3s — consider indexing', level: 'warning', timestamp: new Date(Date.now() - 15000).toISOString() },
-  { event: 'Auth Success', source: 'Auth Service', details: 'Admin login from 10.0.0.5 — session ID: a8f3b2d1', level: 'info', timestamp: new Date(Date.now() - 18000).toISOString() },
-  { event: 'Memory Spike', source: 'System', details: 'Node.js heap usage at 89% — triggered garbage collection', level: 'error', timestamp: new Date(Date.now() - 22000).toISOString() },
-  { event: 'Model Retrained', source: 'AI Engine', details: 'Threat detection model retrained with 12,450 new samples — accuracy 94.7%', level: 'info', timestamp: new Date(Date.now() - 25000).toISOString() },
-  { event: 'Port Scan Block', source: 'IDS', details: 'Blocked SYN scan from 185.220.101.1 targeting ports 22,80,443,3389', level: 'critical', timestamp: new Date(Date.now() - 30000).toISOString() },
-  { event: 'Backup Complete', source: 'Backup Agent', details: 'Full database backup completed — 2.4 GB compressed', level: 'info', timestamp: new Date(Date.now() - 35000).toISOString() },
-  { event: 'Rate Limit Hit', source: 'API Gateway', details: 'Client 10.0.0.23 exceeded 100 req/min limit on /api/alerts', level: 'warning', timestamp: new Date(Date.now() - 40000).toISOString() },
-  { event: 'WebSocket Spike', source: 'Socket.IO', details: '12 new WebSocket connections in last 5 seconds', level: 'info', timestamp: new Date(Date.now() - 45000).toISOString() },
-];
+// ── Source → Icon mapping ──
+const SOURCE_ICONS = {
+  'DPI Engine': Eye, 'Firewall': Shield, 'IDS': Activity, 'ML Model': Cpu,
+  'Auth Service': Lock, 'API Gateway': Globe, 'Socket.IO': Wifi, 'MongoDB': Database,
+  'System': Server, 'TLS Manager': Lock, 'Backup Agent': HardDrive, 'DNS Resolver': Globe,
+  'WAF': Shield, 'SIEM': Activity,
+};
+
+function timeFormat(ts) {
+  return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+function relativeTime(ts) {
+  const diff = Date.now() - new Date(ts).getTime();
+  if (diff < 5000) return 'just now';
+  if (diff < 60000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  return `${Math.floor(diff / 3600000)}h ago`;
+}
 
 export default function LogsPage() {
-  const [logs, setLogs] = useState(SIMULATED_LOGS);
+  const { liveLogs, emit, isConnected } = useSocket();
+  const [dbLogs, setDbLogs] = useState([]);
   const [filterLevel, setFilterLevel] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isPaused, setIsPaused] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
-  const { liveAlerts } = useSocket();
+  const [pausedSnapshot, setPausedSnapshot] = useState([]);
+  const [expandedLog, setExpandedLog] = useState(null);
+  const [viewMode, setViewMode] = useState('stream'); // 'stream' | 'table'
   const listRef = useRef(null);
 
-  // Try to fetch real logs
+  // Fetch initial DB logs
   useEffect(() => {
-    fetchLogs()
-      .then((data) => {
-        if (data.length > 0) {
-          setLogs([...data, ...SIMULATED_LOGS]);
-        }
-      })
-      .catch(() => {});
-  }, []);
+    emit('requestLogs');
+    fetchLogs().then(data => { if (data.length > 0) setDbLogs(data); }).catch(() => {});
+  }, [emit]);
 
-  // Generate new simulated log entries
+  // Snapshot on pause
   useEffect(() => {
-    if (isPaused) return;
-    const sources = ['DPI Engine', 'Firewall', 'IDS', 'ML Model', 'Auth Service', 'API Gateway', 'Socket.IO', 'MongoDB', 'System'];
-    const events = [
-      { event: 'Connection Accepted', level: 'info', detail: 'New TCP connection' },
-      { event: 'Signature Match', level: 'warning', detail: 'Rule match on' },
-      { event: 'Packet Dropped', level: 'error', detail: 'Malformed packet from' },
-      { event: 'Session Timeout', level: 'info', detail: 'Idle session expired for' },
-      { event: 'Threat Intel Update', level: 'info', detail: 'Updated IOC database with' },
-      { event: 'Rate Exceeded', level: 'warning', detail: 'Rate limit breach by' },
-      { event: 'Exploit Blocked', level: 'critical', detail: 'Exploit attempt blocked from' },
-    ];
-
-    const interval = setInterval(() => {
-      const ev = events[Math.floor(Math.random() * events.length)];
-      const src = sources[Math.floor(Math.random() * sources.length)];
-      const ip = `${Math.floor(Math.random() * 223) + 1}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
-
-      setLogs((prev) => [{
-        _id: Date.now().toString(),
-        event: ev.event,
-        source: src,
-        details: `${ev.detail} ${ip}`,
-        level: ev.level,
-        timestamp: new Date().toISOString(),
-      }, ...prev].slice(0, 200));
-    }, 3000);
-
-    return () => clearInterval(interval);
+    if (isPaused) setPausedSnapshot([...liveLogs, ...dbLogs]);
   }, [isPaused]);
 
-  // Auto scroll
+  // Auto-scroll
   useEffect(() => {
-    if (autoScroll && listRef.current) {
-      listRef.current.scrollTop = 0;
-    }
-  }, [logs, autoScroll]);
+    if (!isPaused && listRef.current) listRef.current.scrollTop = 0;
+  }, [liveLogs, isPaused]);
 
-  const filteredLogs = logs.filter((log) => {
+  const allLogs = isPaused ? pausedSnapshot : [...liveLogs, ...dbLogs];
+
+  const filteredLogs = useMemo(() => allLogs.filter(log => {
     if (filterLevel !== 'all' && log.level !== filterLevel) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      return (
-        (log.event || '').toLowerCase().includes(q) ||
-        (log.source || '').toLowerCase().includes(q) ||
-        (log.details || '').toLowerCase().includes(q)
-      );
+      return (log.event || '').toLowerCase().includes(q) ||
+             (log.source || '').toLowerCase().includes(q) ||
+             (log.details || '').toLowerCase().includes(q);
     }
     return true;
-  });
+  }), [allLogs, filterLevel, searchQuery]);
 
-  const levelCounts = {
-    info: logs.filter(l => l.level === 'info').length,
-    warning: logs.filter(l => l.level === 'warning').length,
-    error: logs.filter(l => l.level === 'error').length,
-    critical: logs.filter(l => l.level === 'critical').length,
-  };
+  const levelCounts = useMemo(() => ({
+    info: allLogs.filter(l => l.level === 'info').length,
+    warning: allLogs.filter(l => l.level === 'warning').length,
+    error: allLogs.filter(l => l.level === 'error').length,
+    critical: allLogs.filter(l => l.level === 'critical').length,
+  }), [allLogs]);
+
+  // Rate: logs per minute estimate
+  const logsPerMin = useMemo(() => {
+    if (allLogs.length < 2) return 0;
+    const newest = new Date(allLogs[0]?.timestamp).getTime();
+    const oldest = new Date(allLogs[Math.min(allLogs.length - 1, 19)]?.timestamp).getTime();
+    const spanMin = Math.max(1, (newest - oldest) / 60000);
+    return Math.round(Math.min(allLogs.length, 20) / spanMin);
+  }, [allLogs]);
+
+  const handleClear = () => { setDbLogs([]); setPausedSnapshot([]); };
 
   return (
-    <>
-      <div className="alerts-page-header">
-        <h2>
-          <Terminal size={24} color="var(--accent-green)" /> System Logs
-        </h2>
-        <div className="filter-bar">
-          <div className="header-search" style={{ maxWidth: '200px' }}>
-            <Search size={16} />
-            <input
-              type="text"
-              placeholder="Search logs..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              id="logs-search-input"
-            />
+    <div className="logs-page">
+      {/* ── Header ── */}
+      <div className="logs-header">
+        <div className="logs-header-left">
+          <div className="logs-title-icon"><Terminal size={22} /></div>
+          <div>
+            <h1>System Logs</h1>
+            <p>Real-time event stream from all CyberShield subsystems</p>
           </div>
-          <select value={filterLevel} onChange={(e) => setFilterLevel(e.target.value)} id="logs-level-filter">
-            <option value="all">All Levels</option>
-            <option value="info">Info</option>
-            <option value="warning">Warning</option>
-            <option value="error">Error</option>
-            <option value="critical">Critical</option>
-          </select>
-          <button className="log-control-btn" onClick={() => setIsPaused(!isPaused)} title={isPaused ? 'Resume' : 'Pause'}>
-            {isPaused ? <Play size={16} /> : <Pause size={16} />}
+        </div>
+        <div className="logs-header-right">
+          <div className={`logs-connection ${isConnected ? 'online' : 'offline'}`}>
+            <Radio size={12} />
+            <span>{isConnected ? 'LIVE' : 'OFFLINE'}</span>
+          </div>
+          <div className="logs-view-toggle">
+            <button className={viewMode === 'stream' ? 'active' : ''} onClick={() => setViewMode('stream')} title="Stream View">
+              <Terminal size={14} />
+            </button>
+            <button className={viewMode === 'table' ? 'active' : ''} onClick={() => setViewMode('table')} title="Table View">
+              <Database size={14} />
+            </button>
+          </div>
+          <button className={`logs-control-btn ${isPaused ? 'paused' : ''}`} onClick={() => setIsPaused(!isPaused)} title={isPaused ? 'Resume' : 'Pause'}>
+            {isPaused ? <Play size={14} /> : <Pause size={14} />}
+            {isPaused ? 'Resume' : 'Pause'}
           </button>
-          <button className="log-control-btn" onClick={() => setLogs([])} title="Clear">
-            <Trash2 size={16} />
+          <button className="logs-control-btn danger" onClick={handleClear} title="Clear Logs">
+            <Trash2 size={14} /> Clear
           </button>
         </div>
       </div>
 
-      {/* Level Counts */}
-      <div className="log-level-bar">
-        {Object.entries(levelCounts).map(([level, count]) => (
-          <div
-            key={level}
-            className={`log-level-chip ${filterLevel === level ? 'active' : ''}`}
-            onClick={() => setFilterLevel(filterLevel === level ? 'all' : level)}
-            style={{ '--chip-color': LEVEL_COLORS[level] }}
-          >
-            <div className="log-level-dot" style={{ background: LEVEL_COLORS[level] }} />
-            <span className="log-level-name">{level}</span>
-            <span className="log-level-count">{count}</span>
+      {/* ── Stats Bar ── */}
+      <div className="logs-stats-bar">
+        {Object.entries(LEVEL_CONFIG).map(([level, cfg]) => {
+          const Icon = cfg.icon;
+          const count = levelCounts[level];
+          const isActive = filterLevel === level;
+          return (
+            <button
+              key={level}
+              className={`logs-stat-card ${isActive ? 'active' : ''}`}
+              onClick={() => setFilterLevel(filterLevel === level ? 'all' : level)}
+              style={{ '--stat-color': cfg.color, '--stat-bg': cfg.bg }}
+            >
+              <Icon size={18} color={cfg.color} />
+              <div className="logs-stat-content">
+                <span className="logs-stat-value">{count}</span>
+                <span className="logs-stat-label">{cfg.label}</span>
+              </div>
+              {isActive && <div className="logs-stat-active-dot" />}
+            </button>
+          );
+        })}
+
+        <div className="logs-stat-card meta">
+          <Activity size={18} color="#8b5cf6" />
+          <div className="logs-stat-content">
+            <span className="logs-stat-value">{allLogs.length}</span>
+            <span className="logs-stat-label">TOTAL</span>
           </div>
-        ))}
-        <span className="log-total">Total: {logs.length} entries</span>
-        {isPaused && <span className="log-paused-badge">⏸ PAUSED</span>}
+        </div>
+
+        <div className="logs-stat-card meta">
+          <Clock size={18} color="#10b981" />
+          <div className="logs-stat-content">
+            <span className="logs-stat-value">{logsPerMin}/m</span>
+            <span className="logs-stat-label">RATE</span>
+          </div>
+        </div>
       </div>
 
-      {/* Log Entries */}
-      <div className="log-terminal" ref={listRef}>
-        {filteredLogs.length === 0 && (
-          <div className="log-empty">No log entries match your filters</div>
-        )}
-        {filteredLogs.map((log, i) => (
-          <div key={log._id || `log-${i}`} className={`log-entry level-${log.level}`}>
-            <span className="log-timestamp">
-              {new Date(log.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
-            </span>
-            <span className="log-level-tag" style={{ color: LEVEL_COLORS[log.level], borderColor: `${LEVEL_COLORS[log.level]}40` }}>
-              {log.level?.toUpperCase()}
-            </span>
-            <span className="log-source">[{log.source}]</span>
-            <span className="log-event">{log.event}</span>
-            <span className="log-details">{log.details}</span>
-          </div>
-        ))}
+      {/* ── Search & Filter Bar ── */}
+      <div className="logs-filter-bar">
+        <div className="logs-search-box">
+          <Search size={16} />
+          <input
+            type="text"
+            placeholder="Search events, sources, details..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            id="logs-search-input"
+          />
+          {searchQuery && (
+            <button className="logs-search-clear" onClick={() => setSearchQuery('')}>×</button>
+          )}
+        </div>
+        <div className="logs-filter-info">
+          <span>{filteredLogs.length} of {allLogs.length} entries</span>
+          {filterLevel !== 'all' && (
+            <button className="logs-filter-tag" onClick={() => setFilterLevel('all')}>
+              {filterLevel.toUpperCase()} × 
+            </button>
+          )}
+          {isPaused && <span className="logs-paused-indicator">⏸ PAUSED</span>}
+        </div>
       </div>
-    </>
+
+      {/* ── Log Stream / Table ── */}
+      <div className={`logs-terminal ${viewMode}`} ref={listRef}>
+        {filteredLogs.length === 0 && (
+          <div className="logs-empty">
+            <Terminal size={40} />
+            <h3>No logs match your filters</h3>
+            <p>Try adjusting your search or level filters</p>
+          </div>
+        )}
+
+        {viewMode === 'stream' ? (
+          // ── Stream View ──
+          filteredLogs.map((log, i) => {
+            const cfg = LEVEL_CONFIG[log.level] || LEVEL_CONFIG.info;
+            const LevelIcon = cfg.icon;
+            const SourceIcon = SOURCE_ICONS[log.source] || Server;
+            const isExpanded = expandedLog === (log._id || `log-${i}`);
+            const isNew = i === 0 && !isPaused;
+
+            return (
+              <div
+                key={log._id || `log-${i}`}
+                className={`logs-entry ${log.level} ${isExpanded ? 'expanded' : ''} ${isNew ? 'logs-entry-new' : ''}`}
+                onClick={() => setExpandedLog(isExpanded ? null : (log._id || `log-${i}`))}
+              >
+                <div className="logs-entry-main">
+                  {/* Level indicator */}
+                  <div className="logs-entry-level" style={{ background: cfg.bg, color: cfg.color }}>
+                    <LevelIcon size={12} />
+                  </div>
+
+                  {/* Timestamp */}
+                  <span className="logs-entry-time">{timeFormat(log.timestamp)}</span>
+
+                  {/* Level badge */}
+                  <span className="logs-entry-badge" style={{ color: cfg.color, borderColor: `${cfg.color}30`, background: cfg.bg }}>
+                    {cfg.label}
+                  </span>
+
+                  {/* Source */}
+                  <span className="logs-entry-source">
+                    <SourceIcon size={10} />
+                    {log.source}
+                  </span>
+
+                  {/* Event */}
+                  <span className="logs-entry-event">{log.event}</span>
+
+                  {/* Details preview */}
+                  <span className="logs-entry-details">{log.details}</span>
+
+                  {/* Relative time */}
+                  <span className="logs-entry-ago">{relativeTime(log.timestamp)}</span>
+
+                  {/* Expand chevron */}
+                  <span className="logs-entry-expand">
+                    {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  </span>
+                </div>
+
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div className="logs-entry-detail">
+                    <div className="logs-detail-grid">
+                      <div className="logs-detail-item">
+                        <span className="logs-detail-label">Event</span>
+                        <span className="logs-detail-value">{log.event}</span>
+                      </div>
+                      <div className="logs-detail-item">
+                        <span className="logs-detail-label">Source</span>
+                        <span className="logs-detail-value">{log.source}</span>
+                      </div>
+                      <div className="logs-detail-item">
+                        <span className="logs-detail-label">Level</span>
+                        <span className="logs-detail-value" style={{ color: cfg.color }}>{log.level?.toUpperCase()}</span>
+                      </div>
+                      <div className="logs-detail-item">
+                        <span className="logs-detail-label">Timestamp</span>
+                        <span className="logs-detail-value mono">{new Date(log.timestamp).toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <div className="logs-detail-full">
+                      <span className="logs-detail-label">Full Details</span>
+                      <div className="logs-detail-message">{log.details}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          // ── Table View ──
+          <table className="logs-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Level</th>
+                <th>Source</th>
+                <th>Event</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredLogs.map((log, i) => {
+                const cfg = LEVEL_CONFIG[log.level] || LEVEL_CONFIG.info;
+                return (
+                  <tr key={log._id || `log-${i}`} className={`logs-table-row ${log.level}`}>
+                    <td className="logs-table-time">{timeFormat(log.timestamp)}</td>
+                    <td>
+                      <span className="logs-table-badge" style={{ color: cfg.color, background: cfg.bg }}>{cfg.label}</span>
+                    </td>
+                    <td className="logs-table-source">{log.source}</td>
+                    <td className="logs-table-event">{log.event}</td>
+                    <td className="logs-table-details">{log.details}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
   );
 }

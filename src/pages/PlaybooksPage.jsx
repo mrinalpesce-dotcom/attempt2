@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   BookOpen, Play, Shield, Eye, Lock, Activity, Radio,
   AlertTriangle, Zap, ShieldCheck, Server as ServerIcon, Globe,
   CheckCircle2, Clock, ArrowRight
 } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
+import { executePlaybook } from '../api';
 
 const playbooks = [
   {
@@ -118,27 +119,28 @@ const playbooks = [
 ];
 
 export default function PlaybooksPage() {
+  const { isConnected, playbookProgress, emit } = useSocket();
   const [selectedPlaybook, setSelectedPlaybook] = useState(null);
-  const [runningPlaybook, setRunningPlaybook] = useState(null);
-  const [completedSteps, setCompletedSteps] = useState([]);
-  const [currentStep, setCurrentStep] = useState(-1);
-  const { isConnected } = useSocket();
 
-  const handleExecute = (playbook) => {
-    setSelectedPlaybook(playbook);
-    setRunningPlaybook(playbook.id);
-    setCompletedSteps([]);
-    setCurrentStep(0);
+  const handleExecute = async (playbook) => {
+    setSelectedPlaybook(playbook.id);
 
-    playbook.steps.forEach((_, i) => {
-      setTimeout(() => {
-        setCurrentStep(i);
-        setCompletedSteps((prev) => [...prev, i]);
-        if (i === playbook.steps.length - 1) {
-          setTimeout(() => setRunningPlaybook(null), 800);
-        }
-      }, (i + 1) * 1200);
-    });
+    // Execute via API (triggers server-side WebSocket progress)
+    try {
+      await executePlaybook({
+        playbookId: playbook.id,
+        title: playbook.title,
+        steps: playbook.steps.map(s => ({ text: s.text })),
+        triggeredBy: 'admin',
+      });
+    } catch {
+      // Fallback: execute via WebSocket directly
+      emit('executePlaybook', {
+        playbookId: playbook.id,
+        title: playbook.title,
+        steps: playbook.steps.map(s => ({ text: s.text })),
+      });
+    }
   };
 
   return (
@@ -163,8 +165,10 @@ export default function PlaybooksPage() {
         <div className="playbook-grid">
           {playbooks.map((pb) => {
             const Icon = pb.icon;
-            const isRunning = runningPlaybook === pb.id;
-            const isComplete = selectedPlaybook?.id === pb.id && !runningPlaybook && completedSteps.length > 0;
+            const progress = playbookProgress[pb.id];
+            const isRunning = progress?.status === 'running';
+            const isComplete = progress?.status === 'completed';
+            const currentStepIndex = progress?.stepIndex ?? -1;
 
             return (
               <div key={pb.id} className={`playbook-card ${isRunning ? 'running' : ''} ${isComplete ? 'complete' : ''}`}>
@@ -198,12 +202,12 @@ export default function PlaybooksPage() {
                   </div>
                 </div>
 
-                {/* Steps Preview */}
+                {/* Steps Preview - now shows server-side progress */}
                 <div className="pb-steps-preview">
                   {pb.steps.map((step, i) => {
                     const StepIcon = step.icon;
-                    const isStepComplete = selectedPlaybook?.id === pb.id && completedSteps.includes(i);
-                    const isStepCurrent = selectedPlaybook?.id === pb.id && currentStep === i && isRunning;
+                    const isStepComplete = selectedPlaybook === pb.id && currentStepIndex >= i;
+                    const isStepCurrent = selectedPlaybook === pb.id && currentStepIndex === i && isRunning;
 
                     return (
                       <div key={i} className={`pb-step ${isStepComplete ? 'done' : ''} ${isStepCurrent ? 'current' : ''}`}>
@@ -217,13 +221,20 @@ export default function PlaybooksPage() {
                   })}
                 </div>
 
+                {/* Progress bar for running playbooks */}
+                {isRunning && progress?.progress != null && (
+                  <div style={{ margin: '8px 0', height: '3px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${progress.progress}%`, background: pb.color, transition: 'width 0.5s ease', borderRadius: '2px' }} />
+                  </div>
+                )}
+
                 <button
                   className={`pb-execute-btn ${isRunning ? 'running' : ''} ${isComplete ? 'complete' : ''}`}
                   onClick={() => handleExecute(pb)}
-                  disabled={runningPlaybook !== null}
+                  disabled={isRunning}
                 >
                   {isRunning ? (
-                    <><div className="spinner" /> Executing...</>
+                    <><div className="spinner" /> Executing... {progress?.progress || 0}%</>
                   ) : isComplete ? (
                     <><ShieldCheck size={16} /> Completed</>
                   ) : (

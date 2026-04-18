@@ -14,6 +14,7 @@ import LogsPage from './pages/LogsPage';
 import LoginPage from './pages/LoginPage';
 import AdminPage from './pages/AdminPage';
 import BruteForcePage from './pages/BruteForcePage';
+import PreventionPage from './pages/PreventionPage';
 import { useAuth } from './context/AuthContext';
 
 function App() {
@@ -40,6 +41,7 @@ function App() {
       logs: 'dashboard',
       admin: 'settings',
       bruteforce: 'simulation',
+      prevention: 'dashboard',
     };
     setActiveHeaderTab(tabMap[page] || 'dashboard');
   };
@@ -82,6 +84,8 @@ function App() {
         return <AdminPage />;
       case 'bruteforce':
         return <BruteForcePage />;
+      case 'prevention':
+        return <PreventionPage />;
       default:
         return <Dashboard />;
     }

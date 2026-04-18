@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 import {
   Activity, Wifi, WifiOff, Radio, Shield, Zap, AlertTriangle,
   Skull, Eye, Globe, Lock, Server, Cpu, BarChart3, Clock,
@@ -23,37 +24,54 @@ function severityColor(s) {
 }
 
 export default function LiveMonitorPage() {
-  const { isConnected, liveAlerts, liveThreats, liveStats, clientCount } = useSocket();
-  const [networkBars, setNetworkBars] = useState([]);
+  const {
+    isConnected, liveAlerts, liveStats, clientCount,
+    systemMetrics, networkActivity, emit
+  } = useSocket();
+
   const [cpuHistory, setCpuHistory] = useState([]);
-  const [memUsage, setMemUsage] = useState(67.3);
-  const [packetsPerSec, setPacketsPerSec] = useState(2453);
-  const [bandwidth, setBandwidth] = useState(124.7);
   const [uptime, setUptime] = useState(0);
   const feedRef = useRef(null);
 
-  // Simulated real-time network activity bars
+  // Request initial metrics
+  useEffect(() => {
+    emit('requestSystemMetrics');
+  }, [emit]);
+
+  // Build CPU history from systemMetrics updates
+  useEffect(() => {
+    if (systemMetrics?.cpuUsage != null) {
+      setCpuHistory((prev) => [...prev, systemMetrics.cpuUsage].slice(-40));
+    }
+  }, [systemMetrics]);
+
+  // Uptime counter
   useEffect(() => {
     const interval = setInterval(() => {
-      setNetworkBars((prev) => {
-        const next = [...prev, Math.random() * 100];
-        return next.slice(-60);
-      });
-      setCpuHistory((prev) => {
-        const next = [...prev, 20 + Math.random() * 60];
-        return next.slice(-40);
-      });
-      setMemUsage((prev) => Math.max(40, Math.min(95, prev + (Math.random() - 0.5) * 3)));
-      setPacketsPerSec((prev) => Math.max(800, Math.min(8000, prev + Math.floor((Math.random() - 0.5) * 400))));
-      setBandwidth((prev) => Math.max(30, Math.min(300, prev + (Math.random() - 0.5) * 20)));
       setUptime((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
   }, []);
 
-  const stats = liveStats || { totalAlerts: 127, criticalThreats: 8, highSeverity: 23, threatsBlocked: 96 };
-
+  const metrics = systemMetrics || {
+    cpuUsage: 0, memoryUsage: 0, packetsPerSec: 0,
+    bandwidth: 0, latency: 0, droppedPackets: 0,
+  };
+  const stats = liveStats || { totalAlerts: 0, criticalThreats: 0, highSeverity: 0, threatsBlocked: 0 };
   const allAlerts = liveAlerts.slice(0, 30);
+
+  const bandwidthIn = networkActivity.length > 0
+    ? networkActivity[networkActivity.length - 1].inbound
+    : (metrics.bandwidth * 0.6).toFixed(1);
+  const bandwidthOut = networkActivity.length > 0
+    ? networkActivity[networkActivity.length - 1].outbound
+    : (metrics.bandwidth * 0.4).toFixed(1);
+  const latency = networkActivity.length > 0
+    ? networkActivity[networkActivity.length - 1].latency
+    : metrics.latency;
+  const dropped = networkActivity.length > 0
+    ? networkActivity[networkActivity.length - 1].dropped
+    : metrics.droppedPackets;
 
   const formatUptime = (s) => {
     const h = Math.floor(s / 3600);
@@ -61,6 +79,9 @@ export default function LiveMonitorPage() {
     const sec = s % 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
+
+  // Use network activity bars from WebSocket
+  const networkBars = networkActivity.map(n => n.bar);
 
   return (
     <>
@@ -91,7 +112,7 @@ export default function LiveMonitorPage() {
           </div>
           <div className="metric-info">
             <span className="metric-label">CPU Usage</span>
-            <span className="metric-value">{cpuHistory.length > 0 ? cpuHistory[cpuHistory.length - 1].toFixed(1) : '0.0'}%</span>
+            <span className="metric-value">{metrics.cpuUsage.toFixed(1)}%</span>
           </div>
           <div className="mini-sparkline">
             {cpuHistory.slice(-20).map((v, i) => (
@@ -106,13 +127,13 @@ export default function LiveMonitorPage() {
           </div>
           <div className="metric-info">
             <span className="metric-label">Memory</span>
-            <span className="metric-value">{memUsage.toFixed(1)}%</span>
+            <span className="metric-value">{metrics.memoryUsage.toFixed(1)}%</span>
           </div>
           <div className="metric-progress-ring">
             <svg width="36" height="36" viewBox="0 0 36 36">
               <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="3" />
               <circle cx="18" cy="18" r="15" fill="none" stroke="var(--accent-purple)" strokeWidth="3"
-                strokeDasharray={`${memUsage * 0.94} ${94 - memUsage * 0.94}`}
+                strokeDasharray={`${metrics.memoryUsage * 0.94} ${94 - metrics.memoryUsage * 0.94}`}
                 strokeDashoffset="23.5" strokeLinecap="round"
                 style={{ transition: 'stroke-dasharray 0.5s ease' }}
               />
@@ -126,10 +147,10 @@ export default function LiveMonitorPage() {
           </div>
           <div className="metric-info">
             <span className="metric-label">Packets/sec</span>
-            <span className="metric-value">{packetsPerSec.toLocaleString()}</span>
+            <span className="metric-value">{Math.round(metrics.packetsPerSec).toLocaleString()}</span>
           </div>
           <div className="metric-trend up">
-            <ArrowUpRight size={14} /> 12%
+            <ArrowUpRight size={14} /> {((metrics.packetsPerSec / 5000) * 100).toFixed(0)}%
           </div>
         </div>
 
@@ -139,10 +160,10 @@ export default function LiveMonitorPage() {
           </div>
           <div className="metric-info">
             <span className="metric-label">Bandwidth</span>
-            <span className="metric-value">{bandwidth.toFixed(1)} <small>MB/s</small></span>
+            <span className="metric-value">{metrics.bandwidth.toFixed(1)} <small>MB/s</small></span>
           </div>
           <div className="metric-trend down">
-            <ArrowDownRight size={14} /> 3%
+            <ArrowDownRight size={14} /> {metrics.errorRate?.toFixed(1) || 0}%
           </div>
         </div>
 
@@ -152,7 +173,7 @@ export default function LiveMonitorPage() {
           </div>
           <div className="metric-info">
             <span className="metric-label">Session Uptime</span>
-            <span className="metric-value mono">{formatUptime(uptime)}</span>
+            <span className="metric-value mono">{systemMetrics?.formattedUptime || formatUptime(uptime)}</span>
           </div>
         </div>
       </div>
@@ -165,22 +186,33 @@ export default function LiveMonitorPage() {
             <h3><Activity size={14} style={{ color: 'var(--accent-cyan)' }} /> Network Activity</h3>
             <span className="monitor-live-badge">● LIVE</span>
           </div>
-          <div className="network-visualizer">
-            {networkBars.map((val, i) => (
-              <div key={i} className="net-bar"
-                style={{
-                  height: `${val}%`,
-                  background: val > 80 ? 'var(--accent-red)' : val > 50 ? 'var(--accent-orange)' : 'var(--accent-cyan)',
-                  opacity: 0.3 + (i / networkBars.length) * 0.7,
-                }}
-              />
-            ))}
+          <div className="network-visualizer" style={{ height: '140px', width: '100%', marginTop: '10px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={networkActivity.slice(-30)} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="networkGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.6}/>
+                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.05}/>
+                  </linearGradient>
+                </defs>
+                <YAxis domain={[0, 100]} hide={true} />
+                <Area 
+                  type="monotone" 
+                  dataKey="bar" 
+                  stroke="#0ea5e9" 
+                  strokeWidth={2.5}
+                  fillOpacity={1}
+                  fill="url(#networkGradient)"
+                  isAnimationActive={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
           <div className="network-stats-row">
-            <div className="net-stat"><span className="label">Inbound</span><span className="val" style={{ color: 'var(--accent-cyan)' }}>{(bandwidth * 0.6).toFixed(1)} MB/s</span></div>
-            <div className="net-stat"><span className="label">Outbound</span><span className="val" style={{ color: 'var(--accent-purple)' }}>{(bandwidth * 0.4).toFixed(1)} MB/s</span></div>
-            <div className="net-stat"><span className="label">Latency</span><span className="val" style={{ color: 'var(--accent-green)' }}>{(12 + Math.random() * 8).toFixed(0)} ms</span></div>
-            <div className="net-stat"><span className="label">Dropped</span><span className="val" style={{ color: 'var(--accent-red)' }}>{Math.floor(Math.random() * 5)}</span></div>
+            <div className="net-stat"><span className="label">Inbound</span><span className="val" style={{ color: 'var(--accent-cyan)' }}>{bandwidthIn} MB/s</span></div>
+            <div className="net-stat"><span className="label">Outbound</span><span className="val" style={{ color: 'var(--accent-purple)' }}>{bandwidthOut} MB/s</span></div>
+            <div className="net-stat"><span className="label">Latency</span><span className="val" style={{ color: 'var(--accent-green)' }}>{latency} ms</span></div>
+            <div className="net-stat"><span className="label">Dropped</span><span className="val" style={{ color: 'var(--accent-red)' }}>{dropped}</span></div>
           </div>
         </div>
 
